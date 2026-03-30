@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background with rounded corners -->
+  <rect width="128" height="128" rx="24" fill="#1e293b"/>
+
+  <!-- Price tag shape -->
+  <path d="M28 28 L72 28 L100 56 L68 100 Q64 106 60 100 L28 60 Z"
+        fill="#f59e0b" opacity="0.15"/>
+
+  <!-- Price tag outline -->
+  <path d="M30 30 L70 30 L98 58 L66 98 Q64 102 62 98 L30 62 Z"
+        fill="none" stroke="#f59e0b" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- Tag hole -->
+  <circle cx="45" cy="45" r="5" fill="none" stroke="#f59e0b" stroke-width="2.5"/>
+
+  <!-- Dollar sign -->
+  <text x="74" y="76" font-family="Arial Black, Arial" font-size="36" font-weight="900"
+        fill="#f59e0b" text-anchor="middle">$</text>
+
+  <!-- Down arrow (price drop indicator) -->
+  <path d="M100 78 L100 102 M100 102 L92 93 M100 102 L108 93"
+        stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
