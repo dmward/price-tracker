@@ -74,17 +74,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-  padding: 8px 14px;
-  width: 100%;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
 .btn-ghost {
   background: transparent;
   color: var(--text-muted);
@@ -125,74 +114,6 @@ button:disabled {
   background: var(--bg-secondary);
   color: var(--text);
   border: 1px solid var(--border);
-}
-
-/* ─── Auth ───────────────────────────────── */
-.auth-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 24px;
-  gap: 16px;
-}
-
-.auth-container h2 {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.auth-container p {
-  color: var(--text-muted);
-  font-size: 13px;
-  text-align: center;
-  line-height: 1.5;
-}
-
-.form {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.form input {
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.form input:focus {
-  border-color: var(--accent);
-}
-
-.form-toggle {
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.form-toggle button {
-  background: none;
-  border: none;
-  color: var(--accent);
-  font-size: 12px;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.error-msg {
-  font-size: 12px;
-  color: var(--danger);
-  text-align: center;
 }
 
 /* ─── Current page track bar ─────────────── */

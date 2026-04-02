@@ -1,4 +1,3 @@
-import { supabase, rehydrateSession, setupAuthPersistence } from '../lib/supabase'
 import { browserAPI } from '../lib/browserAPI'
 import {
   getProductIndex,
@@ -7,6 +6,11 @@ import {
   setCachedProductList,
   incrementBadgeCount,
   clearBadgeCount,
+  getProducts,
+  setProducts,
+  appendPriceRecord,
+  getPriceHistoryForProduct,
+  removeProductHistory,
 } from '../lib/storage'
 import type {
   ExtensionMessage,
@@ -16,8 +20,6 @@ import type {
 
 // ─── Startup ────────────────────────────────────────────────────────────────
 
-rehydrateSession()
-setupAuthPersistence()
 registerAlarm()
 
 // ─── Alarm ──────────────────────────────────────────────────────────────────
@@ -110,9 +112,6 @@ async function handleTrackProduct(senderTab?: chrome.tabs.Tab) {
     return { success: false, error: 'No active tab' }
   }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: 'Not authenticated' }
-
   // Get page metadata from content script
   const meta = await sendToTab<{ type: 'PAGE_META'; title: string; imageUrl: string | null; url: string }>(
     tab.id,
@@ -127,32 +126,41 @@ async function handleTrackProduct(senderTab?: chrome.tabs.Tab) {
   const price = priceResult?.price ?? null
   const currency = priceResult?.currency ?? 'USD'
 
-  // Upsert product (unique constraint: user_id + url)
-  const { data: product, error: productError } = await supabase
-    .from('products')
-    .upsert(
-      { user_id: user.id, url, title, image_url: imageUrl },
-      { onConflict: 'user_id,url', ignoreDuplicates: false },
-    )
-    .select('id')
-    .single()
+  const products = await getProducts()
 
-  if (productError || !product) {
-    return { success: false, error: productError?.message ?? 'Insert failed' }
+  // Dedup by URL
+  const existing = Object.values(products).find((p) => p.url === url)
+  if (existing) {
+    return { success: true, productId: existing.id }
   }
 
-  const productId: string = product.id
+  const productId = crypto.randomUUID()
+  const now = new Date().toISOString()
 
-  // Insert initial price record
+  const product: TrackedProduct = {
+    id: productId,
+    url,
+    title,
+    imageUrl,
+    latestPrice: price,
+    currency,
+    createdAt: now,
+    priceDetectedAt: price !== null ? now : null,
+  }
+
+  products[productId] = product
+  await setProducts(products)
+
   if (price !== null) {
-    await supabase.from('price_history').insert({
-      product_id: productId,
+    await appendPriceRecord(productId, {
+      id: crypto.randomUUID(),
+      productId,
       price,
       currency,
+      detectedAt: now,
     })
   }
 
-  // Update local cache
   await upsertProductCache(productId, { url, title, lastPrice: price, currency })
   await refreshProductListCache()
 
@@ -160,9 +168,11 @@ async function handleTrackProduct(senderTab?: chrome.tabs.Tab) {
 }
 
 async function handleUntrackProduct(productId: string) {
-  const { error } = await supabase.from('products').delete().eq('id', productId)
-  if (error) return { success: false, error: error.message }
+  const products = await getProducts()
+  delete products[productId]
+  await setProducts(products)
 
+  await removeProductHistory(productId)
   await removeProductFromCache(productId)
   await refreshProductListCache()
 
@@ -170,47 +180,17 @@ async function handleUntrackProduct(productId: string) {
 }
 
 async function handleGetTrackedProducts(): Promise<{ products: TrackedProduct[] }> {
-  const { data, error } = await supabase
-    .from('products_with_latest_price')
-    .select('*')
-    .order('created_at', { ascending: false })
-
-  if (error || !data) return { products: [] }
-
-  const products: TrackedProduct[] = data.map((row: Record<string, unknown>) => ({
-    id: row.id as string,
-    url: row.url as string,
-    title: (row.title as string | null) ?? null,
-    imageUrl: (row.image_url as string | null) ?? null,
-    latestPrice: (row.latest_price as number | null) ?? null,
-    currency: (row.latest_currency as string | null) ?? 'USD',
-    createdAt: row.created_at as string,
-    priceDetectedAt: (row.price_detected_at as string | null) ?? null,
-  }))
-
-  await setCachedProductList(products)
-  return { products }
+  const products = await getProducts()
+  const sorted = Object.values(products).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+  await setCachedProductList(sorted)
+  return { products: sorted }
 }
 
 async function handleGetPriceHistory(productId: string) {
-  const { data, error } = await supabase
-    .from('price_history')
-    .select('*')
-    .eq('product_id', productId)
-    .order('detected_at', { ascending: false })
-    .limit(50)
-
-  if (error || !data) return { history: [] }
-
-  return {
-    history: data.map((row: Record<string, unknown>) => ({
-      id: row.id as string,
-      productId: row.product_id as string,
-      price: row.price as number,
-      currency: row.currency as string,
-      detectedAt: row.detected_at as string,
-    })),
-  }
+  const history = await getPriceHistoryForProduct(productId)
+  return { history }
 }
 
 async function handleCheckIfTracked(url: string) {
@@ -235,22 +215,22 @@ async function handlePassivePriceResult(msg: PriceResultMsg) {
     await recordPriceDrop(productId, cached, msg.price, msg.currency)
   } else {
     // Still record price even without a drop (builds history)
-    await supabase.from('price_history').insert({
-      product_id: productId,
+    await appendPriceRecord(productId, {
+      id: crypto.randomUUID(),
+      productId,
       price: msg.price,
       currency: msg.currency,
+      detectedAt: new Date().toISOString(),
     })
     await upsertProductCache(productId, { ...cached, lastPrice: msg.price, currency: msg.currency })
+    await updateProductLatestPrice(productId, msg.price, msg.currency)
   }
 }
 
 // ─── Background Price Check Cycle ────────────────────────────────────────────
 
 async function runPriceCheckCycle() {
-  const session = await rehydrateSession()
-  if (!session) return
-
-  // Prefer local cache; fall back to Supabase so the alarm never silently skips
+  // Prefer local cache; fall back to full products store so the alarm never silently skips
   let entries = Object.entries(await getProductIndex())
   if (entries.length === 0) {
     const { products } = await handleGetTrackedProducts()
@@ -267,7 +247,7 @@ async function runPriceCheckCycle() {
   }
 }
 
-// Manual scan: always fetches fresh product list from Supabase
+// Manual scan: always fetches fresh product list from local storage
 async function handleScanPrices(): Promise<{ success: boolean; checked: number; scannedAt?: string }> {
   const { products } = await handleGetTrackedProducts()
   if (products.length === 0) return { success: true, checked: 0 }
@@ -331,8 +311,15 @@ async function checkPriceForEntry(
         ? ` (was ${formatPrice(entry.lastPrice, entry.currency)})`
         : ''
       console.log(`[price-tracker] ${label}: ${formatted}${change}`)
-      await supabase.from('price_history').insert({ product_id: productId, price, currency })
+      await appendPriceRecord(productId, {
+        id: crypto.randomUUID(),
+        productId,
+        price,
+        currency,
+        detectedAt: new Date().toISOString(),
+      })
       await upsertProductCache(productId, { ...entry, lastPrice: price, currency })
+      await updateProductLatestPrice(productId, price, currency)
     }
   } catch (err) {
     console.error(`[price-tracker] ${label}: check failed`, err)
@@ -363,17 +350,20 @@ async function recordPriceDrop(
   newPrice: number,
   currency: string,
 ) {
-  // Insert new price record
-  await supabase.from('price_history').insert({ product_id: productId, price: newPrice, currency })
+  await appendPriceRecord(productId, {
+    id: crypto.randomUUID(),
+    productId,
+    price: newPrice,
+    currency,
+    detectedAt: new Date().toISOString(),
+  })
 
-  // Update local cache
   await upsertProductCache(productId, { ...entry, lastPrice: newPrice, currency })
+  await updateProductLatestPrice(productId, newPrice, currency)
   await refreshProductListCache()
 
-  // Send notification
   sendPriceDropNotification(productId, entry, newPrice, currency)
 
-  // Update badge
   const count = await incrementBadgeCount()
   browserAPI.action.setBadgeText({ text: String(count) })
   browserAPI.action.setBadgeBackgroundColor({ color: '#E53E3E' })
@@ -429,6 +419,20 @@ browserAPI.notifications.onButtonClicked.addListener(async (notificationId) => {
 })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function updateProductLatestPrice(
+  productId: string,
+  price: number,
+  currency: string,
+): Promise<void> {
+  const products = await getProducts()
+  if (products[productId]) {
+    products[productId].latestPrice = price
+    products[productId].currency = currency
+    products[productId].priceDetectedAt = new Date().toISOString()
+    await setProducts(products)
+  }
+}
 
 async function refreshProductListCache() {
   const { products } = await handleGetTrackedProducts()

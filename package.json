@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "package": "node scripts/package.js",
+    "build:pack": "pnpm build && pnpm package"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.4.0",
@@ -15,7 +17,6 @@
     "vite": "^8.0.1"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.100.1",
     "preact": "^10.29.0"
   }
 }

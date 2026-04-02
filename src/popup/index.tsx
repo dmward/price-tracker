@@ -1,119 +1,27 @@
 import { render, h } from 'preact'
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import { supabase, setupAuthPersistence } from '../lib/supabase'
 import { browserAPI } from '../lib/browserAPI'
 import { getCachedProductList, clearBadgeCount } from '../lib/storage'
 import type { TrackedProduct } from '../lib/messages'
-import type { User } from '@supabase/supabase-js'
-
-setupAuthPersistence()
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 function App() {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user)
-      setLoading(false)
-    })
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    // Clear badge when popup opens
     clearBadgeCount()
     browserAPI.action.setBadgeText({ text: '' })
-
-    return () => listener.subscription.unsubscribe()
   }, [])
-
-  if (loading) return <div class="loading">Loading…</div>
 
   return (
     <div id="app">
-      {user ? <MainView user={user} /> : <AuthView onAuth={setUser} />}
-    </div>
-  )
-}
-
-// ─── Auth View ────────────────────────────────────────────────────────────────
-
-function AuthView({ onAuth }: { onAuth: (u: User) => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const submit = async (e: Event) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-
-    const fn =
-      mode === 'login'
-        ? supabase.auth.signInWithPassword({ email, password })
-        : supabase.auth.signUp({ email, password })
-
-    const { data, error: authError } = await fn
-    setLoading(false)
-
-    if (authError) {
-      setError(authError.message)
-      return
-    }
-
-    if (mode === 'register' && !data.session) {
-      setError('Check your email to confirm your account, then log in.')
-      return
-    }
-
-    if (data.user) onAuth(data.user)
-  }
-
-  return (
-    <div class="auth-container">
-      <h2>{mode === 'login' ? 'Sign in' : 'Create account'}</h2>
-      <p>Track product prices across the web and get notified when they drop.</p>
-
-      <form class="form" onSubmit={submit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-          required
-        />
-        {error && <p class="error-msg">{error}</p>}
-        <button class="btn-primary" type="submit" disabled={loading}>
-          {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
-        </button>
-      </form>
-
-      <p class="form-toggle">
-        {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-        <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>
-          {mode === 'login' ? 'Sign up' : 'Sign in'}
-        </button>
-      </p>
+      <MainView />
     </div>
   )
 }
 
 // ─── Main View ────────────────────────────────────────────────────────────────
 
-function MainView({ user: _user }: { user: User }) {
+function MainView() {
   const [products, setProducts] = useState<TrackedProduct[]>([])
   const [loadingProducts, setLoadingProducts] = useState(true)
   const [currentTab, setCurrentTab] = useState<{ url: string; title: string; price: number | null; currency: string } | null>(null)
@@ -208,10 +116,6 @@ function MainView({ user: _user }: { user: User }) {
     })
   }
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-  }
-
   return (
     <>
       <div class="header">
@@ -225,7 +129,6 @@ function MainView({ user: _user }: { user: User }) {
           >
             {scanState === 'scanning' ? 'Scanning…' : scanState === 'done' ? `Checked ${scanCount} ✓` : 'Scan prices'}
           </button>
-          <button class="btn-ghost" onClick={handleSignOut}>Sign out</button>
         </div>
       </div>
 
