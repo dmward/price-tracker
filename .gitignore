@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-safari-worker
+safari/
 *.local
 *.zip
 .env

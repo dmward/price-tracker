@@ -6,6 +6,8 @@ export type UntrackProductMsg = { type: 'UNTRACK_PRODUCT'; productId: string }
 export type GetTrackedProductsMsg = { type: 'GET_TRACKED_PRODUCTS' }
 export type GetPriceHistoryMsg = { type: 'GET_PRICE_HISTORY'; productId: string }
 export type ScanPricesMsg = { type: 'SCAN_PRICES' }
+export type GetSettingsMsg = { type: 'GET_SETTINGS' }
+export type UpdateSettingsMsg = { type: 'UPDATE_SETTINGS'; settings: Partial<Settings> }
 
 // Background → Content (via chrome.tabs.sendMessage)
 export type ExtractPriceMsg = { type: 'EXTRACT_PRICE' }
@@ -37,6 +39,8 @@ export type ExtensionMessage =
   | GetTrackedProductsMsg
   | GetPriceHistoryMsg
   | ScanPricesMsg
+  | GetSettingsMsg
+  | UpdateSettingsMsg
   | ExtractPriceMsg
   | GetPageMetaMsg
   | CheckIfTrackedMsg
@@ -51,6 +55,8 @@ export interface MessageResponseMap {
   GET_TRACKED_PRODUCTS: { products: TrackedProduct[] }
   GET_PRICE_HISTORY: { history: PriceRecord[] }
   SCAN_PRICES: { success: boolean; checked: number; scannedAt?: string }
+  GET_SETTINGS: { settings: Settings }
+  UPDATE_SETTINGS: { success: boolean }
   EXTRACT_PRICE: PriceResultMsg
   GET_PAGE_META: PageMetaMsg
   CHECK_IF_TRACKED: TrackedStatusMsg
@@ -74,4 +80,16 @@ export interface PriceRecord {
   price: number
   currency: string
   detectedAt: string
+}
+
+export interface Settings {
+  scanIntervalMinutes: number
+  notificationsEnabled: boolean
+  maxHistoryRecords: number
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  scanIntervalMinutes: 30,
+  notificationsEnabled: true,
+  maxHistoryRecords: 50,
 }

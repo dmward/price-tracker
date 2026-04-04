@@ -11,11 +11,14 @@ import {
   appendPriceRecord,
   getPriceHistoryForProduct,
   removeProductHistory,
+  getSettings,
+  updateSettings,
 } from '../lib/storage'
 import type {
   ExtensionMessage,
   TrackedProduct,
   PriceResultMsg,
+  Settings,
 } from '../lib/messages'
 
 // ─── Startup ────────────────────────────────────────────────────────────────
@@ -24,16 +27,18 @@ registerAlarm()
 
 // ─── Alarm ──────────────────────────────────────────────────────────────────
 
-function registerAlarm(): void {
+async function registerAlarm(): Promise<void> {
+  const settings = await getSettings()
   browserAPI.alarms.get('PRICE_CHECK', (alarm) => {
     if (!alarm) {
-      browserAPI.alarms.create('PRICE_CHECK', { periodInMinutes: 30 })
+      browserAPI.alarms.create('PRICE_CHECK', { periodInMinutes: settings.scanIntervalMinutes })
     }
   })
 }
 
-browserAPI.runtime.onInstalled.addListener(() => {
-  browserAPI.alarms.create('PRICE_CHECK', { periodInMinutes: 30 })
+browserAPI.runtime.onInstalled.addListener(async () => {
+  const settings = await getSettings()
+  browserAPI.alarms.create('PRICE_CHECK', { periodInMinutes: settings.scanIntervalMinutes })
 })
 
 browserAPI.alarms.onAlarm.addListener((alarm) => {
@@ -83,6 +88,18 @@ browserAPI.runtime.onMessage.addListener(
         handleScanPrices()
           .then(sendResponse)
           .catch((e) => sendResponse({ success: false, checked: 0, error: String(e) }))
+        return true
+
+      case 'GET_SETTINGS':
+        getSettings()
+          .then((settings) => sendResponse({ settings }))
+          .catch((e) => sendResponse({ settings: null, error: String(e) }))
+        return true
+
+      case 'UPDATE_SETTINGS':
+        handleUpdateSettings(message.settings)
+          .then(() => sendResponse({ success: true }))
+          .catch((e) => sendResponse({ success: false, error: String(e) }))
         return true
 
       case 'PRICE_RESULT':
@@ -152,13 +169,14 @@ async function handleTrackProduct(senderTab?: chrome.tabs.Tab) {
   await setProducts(products)
 
   if (price !== null) {
+    const { maxHistoryRecords } = await getSettings()
     await appendPriceRecord(productId, {
       id: crypto.randomUUID(),
       productId,
       price,
       currency,
       detectedAt: now,
-    })
+    }, maxHistoryRecords)
   }
 
   await upsertProductCache(productId, { url, title, lastPrice: price, currency })
@@ -202,6 +220,16 @@ async function handleCheckIfTracked(url: string) {
   return { isTracked: false }
 }
 
+async function handleUpdateSettings(partial: Partial<Settings>) {
+  const updated = await updateSettings(partial)
+  // Re-register alarm if interval changed
+  if (partial.scanIntervalMinutes != null) {
+    browserAPI.alarms.clear('PRICE_CHECK', () => {
+      browserAPI.alarms.create('PRICE_CHECK', { periodInMinutes: updated.scanIntervalMinutes })
+    })
+  }
+}
+
 async function handlePassivePriceResult(msg: PriceResultMsg) {
   if (msg.price === null) return
 
@@ -214,14 +242,14 @@ async function handlePassivePriceResult(msg: PriceResultMsg) {
   if (cached.lastPrice !== null && msg.price < cached.lastPrice) {
     await recordPriceDrop(productId, cached, msg.price, msg.currency)
   } else {
-    // Still record price even without a drop (builds history)
+    const { maxHistoryRecords } = await getSettings()
     await appendPriceRecord(productId, {
       id: crypto.randomUUID(),
       productId,
       price: msg.price,
       currency: msg.currency,
       detectedAt: new Date().toISOString(),
-    })
+    }, maxHistoryRecords)
     await upsertProductCache(productId, { ...cached, lastPrice: msg.price, currency: msg.currency })
     await updateProductLatestPrice(productId, msg.price, msg.currency)
   }
@@ -311,13 +339,14 @@ async function checkPriceForEntry(
         ? ` (was ${formatPrice(entry.lastPrice, entry.currency)})`
         : ''
       console.log(`[price-tracker] ${label}: ${formatted}${change}`)
+      const { maxHistoryRecords } = await getSettings()
       await appendPriceRecord(productId, {
         id: crypto.randomUUID(),
         productId,
         price,
         currency,
         detectedAt: new Date().toISOString(),
-      })
+      }, maxHistoryRecords)
       await upsertProductCache(productId, { ...entry, lastPrice: price, currency })
       await updateProductLatestPrice(productId, price, currency)
     }
@@ -350,19 +379,23 @@ async function recordPriceDrop(
   newPrice: number,
   currency: string,
 ) {
+  const settings = await getSettings()
+
   await appendPriceRecord(productId, {
     id: crypto.randomUUID(),
     productId,
     price: newPrice,
     currency,
     detectedAt: new Date().toISOString(),
-  })
+  }, settings.maxHistoryRecords)
 
   await upsertProductCache(productId, { ...entry, lastPrice: newPrice, currency })
   await updateProductLatestPrice(productId, newPrice, currency)
   await refreshProductListCache()
 
-  sendPriceDropNotification(productId, entry, newPrice, currency)
+  if (settings.notificationsEnabled) {
+    sendPriceDropNotification(productId, entry, newPrice, currency)
+  }
 
   const count = await incrementBadgeCount()
   browserAPI.action.setBadgeText({ text: String(count) })
@@ -388,35 +421,41 @@ function sendPriceDropNotification(
   const title = entry.title ?? new URL(entry.url).hostname
   const hostname = (() => { try { return new URL(entry.url).hostname } catch { return entry.url } })()
 
-  browserAPI.notifications.create(productId, {
-    type: 'basic',
-    iconUrl: browserAPI.runtime.getURL('icons/icon128.png'),
-    title: 'Price Drop!',
-    message: `${title}: ${oldFormatted} → ${newFormatted}`,
-    contextMessage: hostname,
-    buttons: [{ title: 'View Deal' }],
-    requireInteraction: false,
-    priority: 1,
+  if (browserAPI.notifications?.create) {
+    browserAPI.notifications.create(productId, {
+      type: 'basic',
+      iconUrl: browserAPI.runtime.getURL('icons/icon128.png'),
+      title: 'Price Drop!',
+      message: `${title}: ${oldFormatted} → ${newFormatted}`,
+      contextMessage: hostname,
+      buttons: [{ title: 'View Deal' }],
+      requireInteraction: false,
+      priority: 1,
+    })
+  }
+}
+
+if (browserAPI.notifications?.onClicked) {
+  browserAPI.notifications.onClicked.addListener(async (notificationId) => {
+    const index = await getProductIndex()
+    const entry = index[notificationId]
+    if (entry?.url) {
+      browserAPI.tabs.create({ url: entry.url })
+      browserAPI.notifications.clear(notificationId)
+    }
   })
 }
 
-browserAPI.notifications.onClicked.addListener(async (notificationId) => {
-  const index = await getProductIndex()
-  const entry = index[notificationId]
-  if (entry?.url) {
-    browserAPI.tabs.create({ url: entry.url })
-    browserAPI.notifications.clear(notificationId)
-  }
-})
-
-browserAPI.notifications.onButtonClicked.addListener(async (notificationId) => {
-  const index = await getProductIndex()
-  const entry = index[notificationId]
-  if (entry?.url) {
-    browserAPI.tabs.create({ url: entry.url })
-    browserAPI.notifications.clear(notificationId)
-  }
-})
+if (browserAPI.notifications?.onButtonClicked) {
+  browserAPI.notifications.onButtonClicked.addListener(async (notificationId) => {
+    const index = await getProductIndex()
+    const entry = index[notificationId]
+    if (entry?.url) {
+      browserAPI.tabs.create({ url: entry.url })
+      browserAPI.notifications.clear(notificationId)
+    }
+  })
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

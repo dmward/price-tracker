@@ -1,5 +1,6 @@
 import { browserAPI } from './browserAPI'
-import type { TrackedProduct, PriceRecord } from './messages'
+import type { TrackedProduct, PriceRecord, Settings } from './messages'
+import { DEFAULT_SETTINGS } from './messages'
 
 // Typed wrappers around chrome.storage.local
 
@@ -43,10 +44,10 @@ export async function getPriceHistoryForProduct(productId: string): Promise<Pric
   return all[productId] ?? []
 }
 
-export async function appendPriceRecord(productId: string, record: PriceRecord): Promise<void> {
+export async function appendPriceRecord(productId: string, record: PriceRecord, maxRecords?: number): Promise<void> {
   const all = (await storageGet<Record<string, PriceRecord[]>>(PRICE_HISTORY_KEY)) ?? {}
   const existing = all[productId] ?? []
-  all[productId] = [record, ...existing].slice(0, PRICE_HISTORY_MAX)
+  all[productId] = [record, ...existing].slice(0, maxRecords ?? PRICE_HISTORY_MAX)
   return storageSet(PRICE_HISTORY_KEY, all)
 }
 
@@ -109,6 +110,21 @@ export async function incrementBadgeCount(): Promise<number> {
 
 export async function clearBadgeCount(): Promise<void> {
   await storageSet(BADGE_KEY, 0)
+}
+
+// Settings
+const SETTINGS_KEY = 'settings'
+
+export async function getSettings(): Promise<Settings> {
+  const stored = await storageGet<Partial<Settings>>(SETTINGS_KEY)
+  return { ...DEFAULT_SETTINGS, ...stored }
+}
+
+export async function updateSettings(partial: Partial<Settings>): Promise<Settings> {
+  const current = await getSettings()
+  const updated = { ...current, ...partial }
+  await storageSet(SETTINGS_KEY, updated)
+  return updated
 }
 
 // Cached product list (for fast popup load)
