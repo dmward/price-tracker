@@ -75,10 +75,6 @@ Price Tracker needs to access product pages on any website to extract the curren
 
 Used to open background tabs for automatic price checking of tracked products and to query the active tab when the user clicks "Track price."
 
-### scripting
-
-Used to execute the price-extraction content script on product pages during background price checks.
-
 ### notifications
 
 Used to display a desktop notification when a tracked product's price drops.
